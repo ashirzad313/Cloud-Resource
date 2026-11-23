@@ -6,10 +6,10 @@ A portfolio-focused Go backend project that simulates cloud VM resource manageme
 
 **Milestone 1 complete:** Go HTTP server, routing and JSON health endpoint.
 
-**Milestone 2 in progress:** Step 1 (Dockerizing the Go API) verified locally. Step 2 (PostgreSQL + Docker Compose + Go database connectivity) implemented on the working branch; local verification and discussion are still pending.
+**Milestone 2 complete:** Dockerized Go API, PostgreSQL with Docker Compose, database connectivity and `/ready` manually verified.
 
 - [x] **1. Go API foundation (2–3 h):** entry point, HTTP routing, JSON health endpoint.
-- [ ] **2. Docker and PostgreSQL (4–6 h):** multi-stage Dockerfile, Compose networking, PostgreSQL connection and volume. *Finish Step 2 verification before marking done.*
+- [x] **2. Docker and PostgreSQL (4–6 h):** multi-stage Dockerfile, Compose networking, PostgreSQL connection and persistent volume; manually verified.
 - [ ] **3. Database design (6–8 h):** schema, constraints, migrations and repository layer.
 - [ ] **4. VM REST API (8–10 h):** create, list, get and delete VM records.
 - [ ] **5. VM lifecycle (8–12 h):** state transitions, worker and event history.
@@ -51,7 +51,7 @@ Docker Desktop (Linux containers)
 
 Docker Compose creates a private project network. The API can resolve `db` by service name; `localhost` inside the API would refer to the API container, not PostgreSQL. **PostgreSQL port 5432 is intentionally not published on the Mac**, so use `docker compose exec db` for local database inspection.
 
-The database has no application tables yet. We will design tables and migrations in **Milestone 3**. The `/ready` endpoint checks connectivity, not schema correctness.
+The database has no application tables yet on this milestone. We will design tables and migrations in **Milestone 3**. The `/ready` endpoint checks connectivity, not schema correctness.
 
 ## Milestone 1: run without Docker
 
