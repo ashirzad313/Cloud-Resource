@@ -1,150 +1,177 @@
 # Cloud Resource Management Platform
 
-A portfolio-focused backend project built incrementally with Go, REST APIs, PostgreSQL and Docker. It **simulates** a cloud provider's VM management API; it does not provision real virtual machines.
+A portfolio-focused Go backend project that simulates cloud VM resource management. This is a learning-by-running project: one manageable step at a time, with a single cumulative README and manual verification before merging each milestone. No real VMs are provisioned.
 
-We learn each component by discussing the design, running the application and verifying behavior manually before starting the next step. This README is the **single source of project documentation** and grows with each milestone.
+## Project status and roadmap
 
-## Project status
+**Milestone 1 complete:** Go HTTP server, routing and JSON health endpoint.
 
-- **Milestone 1: complete.** Go HTTP server and `GET /health` have been manually verified.
-- **Milestone 2: in progress, Step 1.** The Dockerfile and `.dockerignore` are prepared on the milestone branch. **Build and runtime verification on your machine are still pending.**
-- **Milestone 2, Step 2 (not started):** PostgreSQL, Docker Compose and API-to-database connectivity.
+**Milestone 2 in progress:** Step 1 (Dockerizing the Go API) verified locally. Step 2 (PostgreSQL + Docker Compose + Go database connectivity) implemented on the working branch; local verification and discussion are still pending.
 
-### Roadmap
-
-- [x] **1. Go API foundation (2–3 h):** entry point, HTTP routing, JSON health endpoint, manual verification.
-- [ ] **2. Docker and PostgreSQL (4–6 h):** Dockerfile, Compose, containers and networking. *(Step 1: Dockerize the Go API — pending verification.)*
-- [ ] **3. Database design (6–8 h):** tables, constraints, SQL migrations and repository layer.
+- [x] **1. Go API foundation (2–3 h):** entry point, HTTP routing, JSON health endpoint.
+- [ ] **2. Docker and PostgreSQL (4–6 h):** multi-stage Dockerfile, Compose networking, PostgreSQL connection and volume. *Finish Step 2 verification before marking done.*
+- [ ] **3. Database design (6–8 h):** schema, constraints, migrations and repository layer.
 - [ ] **4. VM REST API (8–10 h):** create, list, get and delete VM records.
-- [ ] **5. VM lifecycle (8–12 h):** start/stop commands, valid state transitions, worker and event history.
-- [ ] **6. Authentication (8–12 h):** signup, password hashing, tokens and resource ownership.
-- [ ] **7. API improvements (4–6 h):** validation, pagination, filtering and consistent errors.
-- [ ] **8. Quality and verification (8–10 h):** manual API and integration scenarios, failure cases; revisit automated regression tests as complexity grows.
-- [ ] **9. Delivery and CI/CD (6–9 h):** production Docker build, GitHub Actions and API documentation.
-- [ ] **10. Final polish (4–6 h):** observability, graceful shutdown, security review and interview-ready README.
+- [ ] **5. VM lifecycle (8–12 h):** state transitions, worker and event history.
+- [ ] **6. Authentication (8–12 h):** account signup, password hashing, tokens, ownership.
+- [ ] **7. API improvements (4–6 h):** validation, pagination, filtering and errors.
+- [ ] **8. Quality and verification (8–10 h):** manual integration and failure tests; revisit automated tests for regression prevention.
+- [ ] **9. Delivery and CI/CD (6–9 h):** production Docker build, GitHub Actions, API documentation.
+- [ ] **10. Polish (4–6 h):** logging, graceful shutdown, security and CV/interview-ready explanation.
 
-Estimated total: **58–82 learning hours**. Each milestone is developed in a separate branch and merged into `main` only after verification; the working branch is then deleted.
+**Estimated total: 58–82 learning hours.** Work in a milestone branch, merge into `main` only after local verification, then delete the branch.
 
-## Current tech stack
+## Technology stack
 
-- Go 1.27+, standard-library `net/http` and `encoding/json`
-- Docker multi-stage build (Milestone 2, Step 1)
-- PostgreSQL — planned
-- Docker Compose — planned
-- GitHub Actions CI/CD — planned
+- Go 1.27+ with standard-library HTTP routing
+- `github.com/jackc/pgx/v5/pgxpool` for PostgreSQL connectivity and connection pooling
+- Docker multi-stage Go build; Docker Compose for two services
+- PostgreSQL 17 (development database)
+- Planned: schemas, VM lifecycle, authentication, GitHub Actions CI/CD
 
-## Architecture
-
-Currently, `cmd/api/main.go` starts the HTTP server and `internal/httpapi/router.go` registers routes and handlers.
-
-Target architecture as the project grows:
+## Architecture today
 
 ```text
-Client (curl / Postman)
+Mac / terminal
+  |
+  | curl localhost:8080
+  v
+Docker Desktop (Linux containers)
+  |
+  +-- api service (Go, port 8080)
+  |     GET /health -> reports whether Go HTTP server is responding
+  |     GET /ready  -> pings PostgreSQL; 503 when unavailable
+  |         |
+  |         | DATABASE_URL uses host "db", port 5432
+  |         v
+  +-- db service (PostgreSQL 17, internal port 5432)
           |
-       HTTP API
-          |
-       Services (business rules, VM state machine)
-          |
-       Repositories (SQL access)
-          |
-       PostgreSQL
+          +-- postgres_data (named Docker volume)
 ```
 
-We will use a modular monolith with an internal background worker rather than microservices or Kubernetes.
+Docker Compose creates a private project network. The API can resolve `db` by service name; `localhost` inside the API would refer to the API container, not PostgreSQL. **PostgreSQL port 5432 is intentionally not published on the Mac**, so use `docker compose exec db` for local database inspection.
 
-## Run locally without Docker (Milestone 1)
+The database has no application tables yet. We will design tables and migrations in **Milestone 3**. The `/ready` endpoint checks connectivity, not schema correctness.
 
-Prerequisite: Go 1.27 or newer.
+## Milestone 1: run without Docker
+
+With Go 1.27 or newer installed:
 
 ```bash
 go run ./cmd/api
 ```
 
-The API listens on `http://localhost:8080`. To change the port:
+Without a `DATABASE_URL`, the server can still run and `/health` returns HTTP 200, but `/ready` returns HTTP 503 because there is no configured database.
 
-```bash
-PORT=9090 go run ./cmd/api
-```
+To use another port: `PORT=9090 go run ./cmd/api`.
 
-### Manual endpoint checks
-
-From a second terminal:
-
-```bash
-curl -i http://localhost:8080/health
-curl -i -X POST http://localhost:8080/health
-curl -i http://localhost:8080/missing
-```
-
-| Request | HTTP status | Notes |
-| --- | --- | --- |
-| `GET /health` | 200 | JSON body: `{"status":"ok"}` |
-| `POST /health` | 405 | Method Not Allowed |
-| `GET /missing` | 404 | Not Found |
-
-We currently perform manual checks by project preference, rather than committing automated test files.
-
-## Run with Docker (Milestone 2, Step 1)
-
-Prerequisite: Docker Desktop or Docker Engine with a running Docker daemon.
-
-### 1. Build the Docker image
+## Milestone 2, Step 1: run just the API in Docker
 
 ```bash
 docker build -t cloud-resource:dev .
-```
-
-This builds a Go binary in the first stage and copies only the binary into a minimal, non-root runtime image in the second stage. The `scratch` runtime image contains no shell or Go compiler.
-
-### 2. Run the container
-
-Stop any other process using port 8080, then run:
-
-```bash
 docker run --rm --name cloud-api -p 127.0.0.1:8080:8080 cloud-resource:dev
 ```
 
-This runs in the foreground. Keep the terminal open. The port mapping makes port 8080 inside the container reachable only on your computer's loopback address. `EXPOSE 8080` in the Dockerfile is just documentation; `-p` actually publishes the port.
+In another terminal, `curl -i http://localhost:8080/health` should return HTTP 200 with `{"status":"ok"}`.
 
-### 3. Verify from a second terminal
+Stop the container using `Ctrl+C`. The `--rm` flag removes the stopped container. This mode does **not** connect PostgreSQL.
+
+## Milestone 2, Step 2: API and PostgreSQL with Docker Compose
+
+Prerequisites: Docker Desktop running, Docker Compose v2 (`docker compose`) available. No local PostgreSQL installation is required.
+
+### 1. Configure local development credentials
+
+```bash
+cp .env.example .env
+```
+
+`.env.example` contains an **example local development password**. `.env` is excluded from Git and never committed. For now, keep the password alphanumeric because Compose inserts it into a connection URL. This is for local development, not a production secret-management design.
+
+### 2. Start both services
+
+First stop any manually running Go server or `docker run` container using host port 8080. Then:
+
+```bash
+docker compose up --build -d
+docker compose ps
+```
+
+Compose starts `db`, waits for its PostgreSQL health check to pass, then starts `api`. The API connects using `DATABASE_URL=postgres://cloud_resource:...@db:5432/cloud_resource?sslmode=disable` (development only).
+
+### 3. Verify API and database connectivity
 
 ```bash
 curl -i http://localhost:8080/health
-docker ps
+curl -i http://localhost:8080/ready
+docker compose logs api
 ```
 
-Expected: HTTP 200 and `{"status":"ok"}`; `docker ps` lists `cloud-api` as running.
+Expected:
 
-Optionally repeat the POST and missing-route checks above; their results should be unchanged.
+| Request | Status | Body |
+| --- | --- | --- |
+| `GET /health` | HTTP 200 | `{"status":"ok"}` |
+| `GET /ready` | HTTP 200 | `{"status":"ready"}` |
+| `GET /missing` | HTTP 404 | Default Go not-found response |
 
-### 4. Stop and clean up
+The API logs should include `connected to PostgreSQL`.
 
-Press `Ctrl+C` in the terminal running `docker run`. The `--rm` flag removes the stopped container automatically. The image remains available for reuse.
+Ask PostgreSQL which database/user it is connected to:
 
-If `Ctrl+C` does not stop the container, run `docker stop cloud-api` in a second terminal.
+```bash
+docker compose exec db psql -U cloud_resource -d cloud_resource -c "SELECT current_database(), current_user;"
+```
+
+Expected: `cloud_resource` for both columns.
+
+### 4. Optional: watch readiness react to a database outage
+
+```bash
+docker compose stop db
+curl -i http://localhost:8080/health
+curl -i http://localhost:8080/ready
+docker compose start db
+```
+
+While PostgreSQL is stopped, the Go server can still answer `/health` with 200, but `/ready` should return HTTP 503 with `{"status":"not_ready"}`. After PostgreSQL has started and accepted connections again, `/ready` should return 200. This distinction is useful to orchestrators and monitoring systems.
+
+### 5. Stop without deleting database data
+
+```bash
+docker compose down
+```
+
+This removes the Compose containers and network but keeps the named `postgres_data` volume, where PostgreSQL stores its files. **Do not use `docker compose down -v` unless you intentionally want to delete that database volume and its data.** We'll explore SQL persistence and migrations in the next milestone.
 
 ### Troubleshooting
 
-- **Cannot connect to the Docker daemon:** start Docker Desktop / the Docker service and retry `docker version`.
-- **Port already in use:** stop the locally running Go server or map a different host port with `-p 127.0.0.1:8081:8080`, then request `localhost:8081`.
-- **Container exits unexpectedly:** run `docker run --name cloud-api ...` without `--rm` to preserve it for `docker logs cloud-api`, then `docker rm cloud-api` after inspection.
-- **Docker Hub image download fails:** check internet connectivity and that Docker can pull `golang:1.27-alpine`.
+- **Missing password variable:** run `cp .env.example .env` in the repository root.
+- **Port 8080 already allocated:** stop your previous `go run` or `docker run` instance; or change the host-side port in `compose.yaml` to `127.0.0.1:8081:8080` and curl port 8081.
+- **API exits at startup:** inspect `docker compose logs api` and `docker compose ps`; it fails fast when it cannot authenticate or reach PostgreSQL.
+- **Database not healthy:** inspect `docker compose logs db`. On an old retained volume, changing `POSTGRES_PASSWORD` in `.env` does **not** reset an existing PostgreSQL user's password.
+- **Docker daemon unavailable:** start Docker Desktop and retry `docker version`.
 
 ## Current repository structure
 
 ```text
-cmd/api/main.go              # API entry point and server setup
-internal/httpapi/router.go   # HTTP routing and handlers
-go.mod                       # Go module
-Dockerfile                   # Multi-stage Docker image definition
-.dockerignore                # Exclusions from Docker build context
-README.md                    # Documentation and milestone checklist
-.gitignore                   # Git exclusions
+cmd/api/main.go              # Server startup and database connection
+internal/httpapi/router.go   # Health and readiness HTTP handlers
+go.mod / go.sum              # Go dependencies and verified module checksums
+Dockerfile                   # Multi-stage build and non-root runtime
+.dockerignore                # Excludes unnecessary build context
+compose.yaml                 # API, PostgreSQL, health check and named volume
+.env.example                 # Example local development credentials
+.gitignore                   # Excludes .env and local files from Git
+README.md                    # All documentation and progress tracking
 ```
 
-## Planned functionality
+## Future architecture
 
-Authenticated users will manage their own simulated VMs: create, list, inspect, start, stop and delete instances, with defined resource sizes and regions, valid state transitions and lifecycle event history.
+As we add cloud resource features, the architecture will evolve into:
 
-Out of scope initially: real VM provisioning, Kubernetes, distributed microservices, billing and a frontend dashboard.
+```text
+REST handlers -> application services -> repository layer -> PostgreSQL
+```
+
+A background worker inside the same Go application will eventually perform simulated VM lifecycle transitions. We do **not** plan Kubernetes, a microservice fleet, billing or real VM provisioning in the initial scope.
