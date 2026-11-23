@@ -1,0 +1,14 @@
+# Keep unnecessary files and local secrets out of the Docker build context.
+.git
+.gitignore
+.env
+.env.*
+README.md
+
+# Local editor, OS, and build files
+.vscode/
+.idea/
+.DS_Store
+bin/
+coverage.out
+*.test
