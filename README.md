@@ -8,11 +8,11 @@ A portfolio-focused Go backend project that simulates cloud VM resource manageme
 
 **Milestone 2 complete:** Dockerized Go API, PostgreSQL with Docker Compose, database connectivity and `/ready` manually verified.
 
-**Milestone 3 in progress:** Steps 1 and 2 (VM table, constraints and Go repository reads) verified locally. Step 3 implements repository writes, service validation and the first two VM REST endpoints; manual verification pending. Migration tracking remains.
+**Milestone 3 in progress:** Steps 1–3 (VM schema, repository reads/writes, service validation and GET/POST endpoints) verified locally. Step 4 (automatic migration tracking) implemented; local verification pending.
 
 - [x] **1. Go API foundation (2–3 h):** entry point, HTTP routing, JSON health endpoint.
 - [x] **2. Docker and PostgreSQL (4–6 h):** multi-stage Dockerfile, Compose networking, PostgreSQL connection and persistent volume; manually verified.
-- [ ] **3. Database design (6–8 h):** schema, constraints, migrations and repository layer. *(Steps 1–2 verified; Step 3 create/list integration ready to check; migration tracking still to come.)*
+- [ ] **3. Database design (6–8 h):** schema, constraints, migrations and repository layer. *(Steps 1–3 verified; Step 4 automatic migration tracking ready to verify.)*
 - [ ] **4. VM REST API (8–10 h):** finish and verify create, list, get and delete VM records. (Create/list introduced early to verify the repository without a temporary CLI.)
 - [ ] **5. VM lifecycle (8–12 h):** state transitions, worker and event history.
 - [ ] **6. Authentication (8–12 h):** account signup, password hashing, tokens, ownership.
@@ -55,7 +55,7 @@ Docker Desktop (Linux containers)
 
 Docker Compose creates a private project network. The API can resolve `db` by service name; `localhost` inside the API would refer to the API container, not PostgreSQL. **PostgreSQL port 5432 is intentionally not published on the Mac**, so use `docker compose exec db` for local database inspection.
 
-The database was initially empty in Milestone 2. In **Milestone 3**, we add a `virtual_machines` table using a versioned SQL migration. The `/ready` endpoint checks database connectivity, not schema correctness.
+At API startup, embedded SQL migrations create or upgrade the database schema before the HTTP server starts. The `/ready` endpoint checks database connectivity, not continuous schema correctness.
 
 ## Milestone 1: run without Docker
 
@@ -156,7 +156,9 @@ This removes the Compose containers and network but keeps the named `postgres_da
 - **Database not healthy:** inspect `docker compose logs db`. On an old retained volume, changing `POSTGRES_PASSWORD` in `.env` does **not** reset an existing PostgreSQL user's password.
 - **Docker daemon unavailable:** start Docker Desktop and retry `docker version`.
 
-## Milestone 3, Step 1: create our first database table
+## Milestone 3, Step 1: create our first database table (historical exercise)
+
+**Do not execute the manual CREATE TABLE exercise on a new installation now.** Step 4 below applies migrations automatically. These commands document how we learned the initial schema.
 
 A **migration** is a versioned SQL change to the database structure. The new files are:
 
@@ -193,12 +195,12 @@ If you already have the local branch, use `git switch milestone/03-database-desi
 ### 2. Apply the migration exactly once
 
 ```bash
-docker compose exec -T db psql -X -v ON_ERROR_STOP=1 -U cloud_resource -d cloud_resource < migrations/000001_create_virtual_machines.up.sql
+docker compose exec -T db psql -X -v ON_ERROR_STOP=1 --single-transaction -U cloud_resource -d cloud_resource < migrations/000001_create_virtual_machines.up.sql
 ```
 
-Expected psql output includes `BEGIN`, `CREATE TABLE`, `COMMIT`. The `-T` flag disables a pseudo-terminal so shell redirection of the SQL file works. `ON_ERROR_STOP=1` makes psql return a failure on SQL errors.
+Expected psql output includes `CREATE TABLE`. The `-T` flag disables a pseudo-terminal so shell redirection of the SQL file works. `ON_ERROR_STOP=1` makes psql return a failure on SQL errors.
 
-**Important:** This initial exercise uses manual migrations and has no migration tracking yet. Running the same `CREATE TABLE` again will report `relation "virtual_machines" already exists`. Do not use the down migration just to make it rerunnable; we will add proper migration version tracking later.
+**Historical note:** This exercise predates migration tracking. Running the same `CREATE TABLE` again reports that the relation already exists. Do not execute the down migration to make it rerunnable.
 
 ### 3. Inspect the schema
 
@@ -269,7 +271,7 @@ git pull --ff-only
 docker compose up --build -d
 ```
 
-Keep the existing `.env` and PostgreSQL volume. Do not reapply the first migration if your table already exists. For a fresh database, apply Step 1 first.
+Keep the existing `.env` and PostgreSQL volume. Do not reapply the first migration if your table already exists. For fresh databases, Step 4 automatically creates the table.
 
 ### 2. List existing VMs
 
@@ -308,11 +310,78 @@ docker compose exec db psql -U cloud_resource -d cloud_resource -c "SELECT name,
 
 Both should show the newly created VM and any previous valid records.
 
-If the API returns 500, inspect `docker compose logs api`. A missing-table error means the migration has not been applied in the current database. If the API was started without a configured database, VM routes return 503.
+If the API returns 500, inspect `docker compose logs api`. A missing-table error indicates a schema problem; check the startup migration logs. If the API was started without a configured database, VM routes return 503.
 
-### Next within Milestone 3
+## Milestone 3, Step 4: automatic migration tracking
 
-After manual verification we will introduce migration version tracking without deleting your existing VM records. Milestone 4 will finish the remaining REST operations.
+`migrations/migrate.go` embeds the forward SQL files using Go's `//go:embed` directive. The runner sorts the zero-padded filenames, obtains a PostgreSQL transaction-level advisory lock, creates a `schema_migrations` history table if needed, then executes and records pending migrations in one transaction. If any step fails, the transaction rolls back and the API does not start.
+
+Only `*.up.sql` files are run. The runner owns the transaction, so forward migrations must not contain their own BEGIN/COMMIT or nontransactional SQL. Treat applied migration files as immutable and add new numbered files for future schema changes. This is a small forward-only runner for this project; it does not implement checksums or automatic rollback/down migrations.
+
+### Existing development database: baseline once
+
+If you manually applied migration 000001 in Step 1, you need to explicitly tell the runner that it is already applied. This is called **baselining**. Do not use these commands on a fresh database; the API will create its schema automatically.
+
+```bash
+git switch milestone/03-database-design
+git pull --ff-only
+docker compose up -d --wait db
+docker compose exec db psql -U cloud_resource -d cloud_resource -c '\d virtual_machines'
+```
+
+Confirm the existing table matches the eight columns and constraints in Step 1 before recording the baseline. The following command does not create or modify VM records. It refuses to baseline if the table is absent; it does not automatically compare the full schema.
+
+```bash
+docker compose exec -T db psql -X -v ON_ERROR_STOP=1 -U cloud_resource -d cloud_resource <<'SQL'
+BEGIN;
+SELECT pg_advisory_xact_lock(74632001);
+DO $
+BEGIN
+    IF to_regclass('public.virtual_machines') IS NULL THEN
+        RAISE EXCEPTION 'VM table is missing; do not baseline a fresh database';
+    END IF;
+END;
+$;
+CREATE TABLE IF NOT EXISTS schema_migrations (
+    version TEXT PRIMARY KEY,
+    applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+INSERT INTO schema_migrations (version)
+VALUES ('000001_create_virtual_machines.up.sql')
+ON CONFLICT (version) DO NOTHING;
+COMMIT;
+SQL
+```
+
+Then rebuild the API:
+
+```bash
+docker compose up --build -d
+docker compose logs api
+curl -i http://localhost:8080/vms
+docker compose exec db psql -U cloud_resource -d cloud_resource -c "SELECT * FROM schema_migrations;"
+```
+
+Expected: API logs include `database migrations up to date`, existing VMs remain, and the history contains exactly one entry for migration 000001 at this milestone. Restart the API (`docker compose restart api`) and confirm the history is unchanged. Do not delete the volume.
+
+### Fresh installation
+
+With a new database, there is no baseline step. Copy `.env.example` to `.env` if needed, then run `docker compose up --build -d`. Expected startup logs include `applied migration: 000001_create_virtual_machines.up.sql`; `GET /vms` initially returns an empty array.
+
+Optional separate fresh-database verification: stop the original API to free port 8080, then use a distinct Compose project name that has not been used before:
+
+```bash
+docker compose stop api
+docker compose -p cloud-resource-migration-check up --build -d
+docker compose -p cloud-resource-migration-check logs api
+curl -i http://localhost:8080/vms
+docker compose -p cloud-resource-migration-check down
+docker compose up -d
+```
+
+This uses a separate named volume, leaving your original VM data intact. The check project's volume is retained after down. If startup fails, inspect API logs before making any changes to the database.
+
+After local verification, Milestone 3 can be merged. Milestone 4 finishes the remaining VM REST operations.
 
 ## Current repository structure
 
@@ -331,6 +400,7 @@ compose.yaml                 # API, PostgreSQL, health check and named volume
 .gitignore                   # Excludes .env and local files from Git
 README.md                    # All documentation and progress tracking
 migrations/000001_*.sql      # Versioned VM table up/down migrations
+migrations/migrate.go        # Embedded migration runner and version tracking
 ```
 
 ## Future architecture
