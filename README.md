@@ -195,7 +195,7 @@ If you already have the local branch, use `git switch milestone/03-database-desi
 ### 2. Apply the migration exactly once
 
 ```bash
-docker compose exec -T db psql -X -v ON_ERROR_STOP=1 --single-transaction -U cloud_resource -d cloud_resource < migrations/000001_create_virtual_machines.up.sql
+docker compose exec -T db psql -X -v ON_ERROR_STOP=1 --single-transaction -U cloud_resource -d cloud_resource -f - < migrations/000001_create_virtual_machines.up.sql
 ```
 
 Expected psql output includes `CREATE TABLE`. The `-T` flag disables a pseudo-terminal so shell redirection of the SQL file works. `ON_ERROR_STOP=1` makes psql return a failure on SQL errors.
