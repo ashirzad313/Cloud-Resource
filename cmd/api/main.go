@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/ashirzad313/Cloud-Resource/internal/httpapi"
+	"github.com/ashirzad313/Cloud-Resource/internal/storage/postgres"
+	"github.com/ashirzad313/Cloud-Resource/internal/vm"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -40,15 +42,18 @@ func main() {
 		log.Println("DATABASE_URL is not set; /ready will report unavailable")
 	}
 
-	// The HTTP layer only needs a Ping method, not the details of pgxpool.
+	// Assemble application dependencies in one place.
 	var database httpapi.DatabasePinger
+	var vmService *vm.Service
 	if pool != nil {
 		database = pool
+		repository := postgres.NewVMRepository(pool)
+		vmService = vm.NewService(repository)
 	}
 
 	server := &http.Server{
 		Addr:              ":" + port,
-		Handler:           httpapi.NewRouter(database),
+		Handler:           httpapi.NewRouter(database, vmService),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
