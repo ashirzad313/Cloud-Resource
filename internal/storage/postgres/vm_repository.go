@@ -55,3 +55,32 @@ func (r *VMRepository) List(ctx context.Context) ([]vm.VirtualMachine, error) {
 	}
 	return machines, nil
 }
+
+// Create inserts a VM and returns the complete stored record, including defaults.
+func (r *VMRepository) Create(ctx context.Context, input vm.CreateInput) (vm.VirtualMachine, error) {
+	const query = `
+		INSERT INTO virtual_machines (name, cpu_cores, memory_mb, region)
+		VALUES ($1, $2, $3, $4)
+		RETURNING id::text, name, cpu_cores, memory_mb, region, status,
+		          created_at, updated_at
+	`
+
+	var machine vm.VirtualMachine
+	err := r.pool.QueryRow(ctx, query,
+		input.Name, input.CPUCores, input.MemoryMB, input.Region,
+	).Scan(
+		&machine.ID,
+		&machine.Name,
+		&machine.CPUCores,
+		&machine.MemoryMB,
+		&machine.Region,
+		&machine.Status,
+		&machine.CreatedAt,
+		&machine.UpdatedAt,
+	)
+	if err != nil {
+		return vm.VirtualMachine{}, fmt.Errorf("insert virtual machine: %w", err)
+	}
+
+	return machine, nil
+}
