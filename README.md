@@ -8,12 +8,12 @@ A portfolio-focused Go backend project that simulates cloud VM resource manageme
 
 **Milestone 2 complete:** Dockerized Go API, PostgreSQL with Docker Compose, database connectivity and `/ready` manually verified.
 
-**Milestone 3 in progress:** Step 1 (VM table migration, constraints and manual inserts) verified locally. Step 2 (Go repository reads and a temporary inspection command) is implemented, awaiting manual verification.
+**Milestone 3 in progress:** Steps 1 and 2 (VM table, constraints and Go repository reads) verified locally. Step 3 implements repository writes, service validation and the first two VM REST endpoints; manual verification pending. Migration tracking remains.
 
 - [x] **1. Go API foundation (2–3 h):** entry point, HTTP routing, JSON health endpoint.
 - [x] **2. Docker and PostgreSQL (4–6 h):** multi-stage Dockerfile, Compose networking, PostgreSQL connection and persistent volume; manually verified.
-- [ ] **3. Database design (6–8 h):** schema, constraints, migrations and repository layer. *(Step 1 verified; Step 2 repository reading is ready to check; automatic migration tracking still to come.)*
-- [ ] **4. VM REST API (8–10 h):** create, list, get and delete VM records.
+- [ ] **3. Database design (6–8 h):** schema, constraints, migrations and repository layer. *(Steps 1–2 verified; Step 3 create/list integration ready to check; migration tracking still to come.)*
+- [ ] **4. VM REST API (8–10 h):** finish and verify create, list, get and delete VM records. (Create/list introduced early to verify the repository without a temporary CLI.)
 - [ ] **5. VM lifecycle (8–12 h):** state transitions, worker and event history.
 - [ ] **6. Authentication (8–12 h):** account signup, password hashing, tokens, ownership.
 - [ ] **7. API improvements (4–6 h):** validation, pagination, filtering and errors.
@@ -43,6 +43,8 @@ Docker Desktop (Linux containers)
   +-- api service (Go, port 8080)
   |     GET /health -> reports whether Go HTTP server is responding
   |     GET /ready  -> pings PostgreSQL; 503 when unavailable
+  |     GET /vms    -> lists VM records
+  |     POST /vms   -> validates and creates a VM
   |         |
   |         | DATABASE_URL uses host "db", port 5432
   |         v
@@ -240,72 +242,87 @@ The inserted VM should still exist. The data is held in the named `postgres_data
 
 **Do not use `docker compose down -v`** for this experiment, because that removes the database volume.
 
-## Milestone 3, Step 2: read VM records from Go
+## Milestone 3, Step 2: Go repository reads (verified)
 
-We now have three new Go files:
+The VM domain model and PostgreSQL repository map SQL rows to Go structs. We manually verified `List(ctx)` using a temporary `vmcheck` executable. The temporary CLI and its Docker build instructions have now been removed; the real API replaces them.
 
-- `internal/vm/vm.go` — defines the domain model `VirtualMachine` without importing PostgreSQL or HTTP packages.
-- `internal/storage/postgres/vm_repository.go` — holds the SQL-based `VMRepository.List(ctx)` operation; converts query rows into Go structs.
-- `cmd/vmcheck/main.go` — a **temporary developer-only CLI** to execute the repository and print the results. It will be removed when VM REST endpoints are available.
+## Milestone 3, Step 3: create and list VMs through REST
 
-The Dockerfile also compiles `/vmcheck` alongside the existing API and copies it into the runtime image. We use `--entrypoint /vmcheck` to run the inspection command on demand. This is for learning, not a permanent production utility.
+The API now wires a repository and a service together at startup:
 
-### 1. Update the existing milestone branch
+```text
+HTTP handler -> VM service -> repository interface -> PostgreSQL repository -> PostgreSQL
+```
+
+- The HTTP handler decodes JSON, rejects malformed or oversized requests, and selects HTTP status codes.
+- The service validates names, CPU, memory and region using the same limits as our schema.
+- The repository executes parameterized SQL (`$1`, `$2`, etc.) and returns PostgreSQL-generated IDs, status and timestamps.
+- The model has JSON field tags for a consistent API response; the request type only accepts user-editable fields.
+
+Authentication is not implemented yet. These endpoints are for local development only, bound to the Mac's loopback address by Compose. Do not expose this API publicly. Listing currently returns all records; ownership and pagination are planned.
+
+### 1. Get the latest code and rebuild
 
 ```bash
 git switch milestone/03-database-design
 git pull --ff-only
+docker compose up --build -d
 ```
 
-Keep the existing `.env` file. Do **not** rerun the first migration; the VM table and your sample row already exist in the named PostgreSQL volume.
+Keep the existing `.env` and PostgreSQL volume. Do not reapply the first migration if your table already exists. For a fresh database, apply Step 1 first.
 
-### 2. Start PostgreSQL
+### 2. List existing VMs
 
 ```bash
-docker compose up -d db
+curl -i http://localhost:8080/vms
 ```
 
-### 3. Build and run the inspection CLI
+Expected: HTTP 200 with a JSON array containing the record created during Step 1 (or an empty array if no records exist).
+
+### 3. Create a new VM
 
 ```bash
-docker compose run --rm --no-deps --build --entrypoint /vmcheck api
+curl -i -X POST http://localhost:8080/vms \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"database-server-01","cpu_cores":4,"memory_mb":8192,"region":"eu-central-1"}'
 ```
 
-Expected output resembles:
+Expected: HTTP 201 Created, with the saved VM including a UUID, status `stopped`, and creation/update timestamps. The API simulates resources; no actual VM is provisioned. Each successful POST inserts a new record.
 
-```text
-Found 1 virtual machine(s)
-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx | web-server-01 | 2 CPU | 4096 MB | eu-central-1 | stopped
-```
-
-The generated UUID and VM count may differ. A Go tool inside a one-off Compose container connects to the database using the same `DATABASE_URL` and internal `db:5432` name as the API. There is no need to publish port 5432 or install a database client on the Mac.
-
-**Why the CLI instead of an API route?** We are verifying the data-access layer in isolation. In Milestone 4 the HTTP handler will call this repository through a service layer.
-
-### 4. Compare with PostgreSQL directly
+### 4. Verify service validation
 
 ```bash
+curl -i -X POST http://localhost:8080/vms \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"invalid-vm","cpu_cores":0,"memory_mb":8192,"region":"eu-central-1"}'
+```
+
+Expected: HTTP 400 Bad Request with a message that CPU cores must be between 1 and 64. The invalid row must not be inserted.
+
+### 5. Compare API results with PostgreSQL
+
+```bash
+curl -i http://localhost:8080/vms
 docker compose exec db psql -U cloud_resource -d cloud_resource -c "SELECT name, cpu_cores, memory_mb, region, status FROM virtual_machines;"
 ```
 
-The Go CLI and SQL query should show the same records.
+Both should show the newly created VM and any previous valid records.
 
-If the tool says `relation "virtual_machines" does not exist`, check that you are using the same Docker Compose project and volume as in Step 1, and confirm `\d virtual_machines` in psql.
-
-If it reports `Found 0 virtual machine(s)`, PostgreSQL contains no rows yet. Re-run the **valid INSERT** from Step 1 (not the CREATE TABLE migration), then retry.
+If the API returns 500, inspect `docker compose logs api`. A missing-table error means the migration has not been applied in the current database. If the API was started without a configured database, VM routes return 503.
 
 ### Next within Milestone 3
 
-After verifying that Go can read a real record, we'll add the next repository operation and introduce repeatable migration tracking before completing this milestone. The REST API remains Milestone 4.
+After manual verification we will introduce migration version tracking without deleting your existing VM records. Milestone 4 will finish the remaining REST operations.
 
 ## Current repository structure
 
 ```text
 cmd/api/main.go              # Server startup and database connection
-cmd/vmcheck/main.go          # Temporary manual repository inspection CLI
-internal/vm/vm.go            # DB-independent VM domain model
+internal/vm/vm.go            # VM domain model
+internal/vm/service.go       # Business rules and repository interface
 internal/storage/postgres/vm_repository.go # SQL query and row mapping
-internal/httpapi/router.go   # Health and readiness HTTP handlers
+internal/httpapi/router.go   # HTTP route registration and health/readiness
+internal/httpapi/vm_handler.go # JSON request and response handling
 go.mod / go.sum              # Go dependencies and verified module checksums
 Dockerfile                   # Multi-stage build and non-root runtime
 .dockerignore                # Excludes unnecessary build context
@@ -318,7 +335,7 @@ migrations/000001_*.sql      # Versioned VM table up/down migrations
 
 ## Future architecture
 
-As we add cloud resource features, the architecture will evolve into:
+The VM API now follows this architecture:
 
 ```text
 REST handlers -> application services -> repository layer -> PostgreSQL
