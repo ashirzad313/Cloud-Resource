@@ -1,7 +1,5 @@
 -- Milestone 3, Step 1: the first version of our VM resource table.
 -- A migration is a versioned change to the structure of a database.
-BEGIN;
-
 CREATE TABLE virtual_machines (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name VARCHAR(100) NOT NULL,
@@ -23,5 +21,3 @@ CREATE TABLE virtual_machines (
         status IN ('stopped', 'starting', 'running', 'stopping', 'error')
     )
 );
-
-COMMIT;
