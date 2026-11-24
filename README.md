@@ -335,13 +335,13 @@ Confirm the existing table matches the eight columns and constraints in Step 1 b
 docker compose exec -T db psql -X -v ON_ERROR_STOP=1 -U cloud_resource -d cloud_resource <<'SQL'
 BEGIN;
 SELECT pg_advisory_xact_lock(74632001);
-DO $
+DO $baseline$
 BEGIN
     IF to_regclass('public.virtual_machines') IS NULL THEN
         RAISE EXCEPTION 'VM table is missing; do not baseline a fresh database';
     END IF;
 END;
-$;
+$baseline$;
 CREATE TABLE IF NOT EXISTS schema_migrations (
     version TEXT PRIMARY KEY,
     applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
