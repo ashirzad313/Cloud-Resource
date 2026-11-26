@@ -10,10 +10,12 @@ A portfolio-focused Go backend project that simulates cloud VM resource manageme
 
 **Milestone 3 complete:** VM schema, repository reads/writes, service validation, GET/POST endpoints and automatic migration tracking manually verified.
 
+**Milestone 4 in progress:** individual VM GET and DELETE endpoints implemented; manual verification pending.
+
 - [x] **1. Go API foundation (2–3 h):** entry point, HTTP routing, JSON health endpoint.
 - [x] **2. Docker and PostgreSQL (4–6 h):** multi-stage Dockerfile, Compose networking, PostgreSQL connection and persistent volume; manually verified.
 - [x] **3. Database design (6–8 h):** schema, constraints, migrations and repository layer.
-- [ ] **4. VM REST API (8–10 h):** finish and verify create, list, get and delete VM records. (Create/list introduced early to verify the repository without a temporary CLI.)
+- [ ] **4. VM REST API (8–10 h):** create, list, get and delete VM records. *(Create/list verified in Milestone 3; get/delete and status handling ready to verify.)*
 - [ ] **5. VM lifecycle (8–12 h):** state transitions, worker and event history.
 - [ ] **6. Authentication (8–12 h):** account signup, password hashing, tokens, ownership.
 - [ ] **7. API improvements (4–6 h):** validation, pagination, filtering and errors.
@@ -45,6 +47,8 @@ Docker Desktop (Linux containers)
   |     GET /ready  -> pings PostgreSQL; 503 when unavailable
   |     GET /vms    -> lists VM records
   |     POST /vms   -> validates and creates a VM
+  |     GET /vms/{id} -> retrieves an individual VM
+  |     DELETE /vms/{id} -> deletes a stopped VM
   |         |
   |         | DATABASE_URL uses host "db", port 5432
   |         v
@@ -382,6 +386,77 @@ docker compose up -d
 This uses a separate named volume, leaving your original VM data intact. The check project's volume is retained after down. If startup fails, inspect API logs before making any changes to the database.
 
 Milestone 3 verified by the project owner. Milestone 4 finishes the remaining VM REST operations.
+
+## Milestone 4: individual VM REST resources
+
+The existing collection routes are joined by individual resource routes. The service validates UUID format, the repository maps missing rows to a domain error, and HTTP handlers translate errors into status codes. No new dependency or database migration is required.
+
+| Method and path | Success | Expected errors |
+| --- | --- | --- |
+| GET /vms | 200, JSON array | 503 if database not configured; 500 for unexpected storage errors |
+| POST /vms | 201, JSON object and Location header | 400 invalid input, 413 oversized body |
+| GET /vms/{id} | 200, JSON object | 400 malformed UUID, 404 missing VM |
+| DELETE /vms/{id} | 204, empty body | 400 malformed UUID, 404 missing VM, 409 VM not stopped |
+
+All routes remain local-development-only until authentication and ownership checks are implemented. Deletion permanently removes the simulated VM record. The repository obtains a row lock with SELECT ... FOR UPDATE and checks the status inside the same transaction as the DELETE. This prevents concurrent updates of that row from invalidating the status check. Only stopped VMs may be deleted.
+
+### Manual verification
+
+Pull the milestone branch and rebuild:
+
+```bash
+git fetch origin
+git switch --track origin/milestone/04-vm-rest-api
+docker compose up --build -d
+```
+
+If the branch already exists locally, use `git switch milestone/04-vm-rest-api` and `git pull --ff-only` instead. Keep the existing database volume.
+
+Create a **disposable** VM and copy the UUID from its response (or its Location header):
+
+```bash
+curl -i -X POST http://localhost:8080/vms \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"delete-check","cpu_cores":2,"memory_mb":4096,"region":"eu-central-1"}'
+```
+
+Replace the example value below with that UUID.
+
+```bash
+VM_ID='PASTE-UUID-HERE'
+curl -i "http://localhost:8080/vms/$VM_ID"
+curl -i http://localhost:8080/vms/not-a-uuid
+```
+
+Expected: 200 for the disposable VM and 400 for the malformed ID.
+
+To verify the deletion guard before the lifecycle API exists, temporarily set **only the disposable VM** to running using psql. This is a local manual test, not a real VM start operation:
+
+```bash
+docker compose exec -T db psql -X -v ON_ERROR_STOP=1 -U cloud_resource -d cloud_resource -v vm_id="$VM_ID" <<'SQL'
+UPDATE virtual_machines SET status = 'running', updated_at = NOW()
+WHERE id = :'vm_id'::uuid AND name = 'delete-check';
+SQL
+curl -i -X DELETE "http://localhost:8080/vms/$VM_ID"
+curl -i "http://localhost:8080/vms/$VM_ID"
+```
+
+Expected: UPDATE 1, DELETE returns 409, GET returns 200 and status running. Return the disposable VM to stopped, then delete it:
+
+```bash
+docker compose exec -T db psql -X -v ON_ERROR_STOP=1 -U cloud_resource -d cloud_resource -v vm_id="$VM_ID" <<'SQL'
+UPDATE virtual_machines SET status = 'stopped', updated_at = NOW()
+WHERE id = :'vm_id'::uuid AND name = 'delete-check';
+SQL
+curl -i -X DELETE "http://localhost:8080/vms/$VM_ID"
+curl -i "http://localhost:8080/vms/$VM_ID"
+curl -i -X DELETE "http://localhost:8080/vms/$VM_ID"
+curl -i http://localhost:8080/vms
+```
+
+Expected: UPDATE 1, DELETE 204 with no body, subsequent GET and DELETE 404, and list 200 with the original records intact. If UPDATE does not report 1, verify you copied the UUID of the disposable VM before continuing. Repeat GET /health and GET /ready to check previous behavior.
+
+Milestone 5 will introduce lifecycle actions and asynchronous state changes.
 
 ## Current repository structure
 
