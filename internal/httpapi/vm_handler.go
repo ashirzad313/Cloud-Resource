@@ -150,3 +150,37 @@ func writeVMError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusInternalServerError, "virtual machine operation failed")
 	}
 }
+
+func (h vmHandler) start(w http.ResponseWriter, r *http.Request) {
+	h.lifecycleAction(w, r, true)
+}
+
+func (h vmHandler) stop(w http.ResponseWriter, r *http.Request) {
+	h.lifecycleAction(w, r, false)
+}
+
+// The accepted state is persisted before responding; completion is asynchronous.
+func (h vmHandler) lifecycleAction(w http.ResponseWriter, r *http.Request, start bool) {
+	if h.service == nil {
+		writeError(w, http.StatusServiceUnavailable, "database not configured")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	var machine vm.VirtualMachine
+	var err error
+	if start {
+		machine, err = h.service.Start(ctx, r.PathValue("id"))
+	} else {
+		machine, err = h.service.Stop(ctx, r.PathValue("id"))
+	}
+	if err != nil {
+		writeVMError(w, err)
+		return
+	}
+
+	w.Header().Set("Location", "/vms/"+machine.ID)
+	writeJSON(w, http.StatusAccepted, machine)
+}

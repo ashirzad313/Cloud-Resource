@@ -130,8 +130,8 @@ func (r *VMRepository) Delete(ctx context.Context, id string) error {
 	if err != nil {
 		return fmt.Errorf("lock virtual machine: %w", err)
 	}
-	if status != "stopped" {
-		return vm.ErrConflict
+	if status != vm.StatusStopped {
+		return fmt.Errorf("%w: virtual machine must be stopped before deletion", vm.ErrConflict)
 	}
 
 	if _, err := tx.Exec(ctx,
@@ -144,4 +144,49 @@ func (r *VMRepository) Delete(ctx context.Context, id string) error {
 		return fmt.Errorf("commit VM deletion: %w", err)
 	}
 	return nil
+}
+
+// Transition atomically checks the expected state and stores the new state.
+func (r *VMRepository) Transition(ctx context.Context, id, from, to string) (vm.VirtualMachine, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return vm.VirtualMachine{}, fmt.Errorf("begin VM transition: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	var current string
+	err = tx.QueryRow(ctx,
+		"SELECT status FROM virtual_machines WHERE id = $1::text::uuid FOR UPDATE",
+		id,
+	).Scan(&current)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return vm.VirtualMachine{}, vm.ErrNotFound
+	}
+	if err != nil {
+		return vm.VirtualMachine{}, fmt.Errorf("lock VM for transition: %w", err)
+	}
+	if current != from {
+		return vm.VirtualMachine{}, fmt.Errorf("%w: cannot transition from %s to %s; expected %s",
+			vm.ErrConflict, current, to, from)
+	}
+
+	const query = `
+		UPDATE virtual_machines
+		SET status = $2, updated_at = NOW()
+		WHERE id = $1::text::uuid
+		RETURNING id::text, name, cpu_cores, memory_mb, region, status,
+		          created_at, updated_at
+	`
+	var machine vm.VirtualMachine
+	err = tx.QueryRow(ctx, query, id, to).Scan(
+		&machine.ID, &machine.Name, &machine.CPUCores, &machine.MemoryMB,
+		&machine.Region, &machine.Status, &machine.CreatedAt, &machine.UpdatedAt,
+	)
+	if err != nil {
+		return vm.VirtualMachine{}, fmt.Errorf("update VM state: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return vm.VirtualMachine{}, fmt.Errorf("commit VM transition: %w", err)
+	}
+	return machine, nil
 }

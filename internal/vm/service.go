@@ -12,7 +12,7 @@ import (
 var (
 	ErrInvalidInput = errors.New("invalid VM input")
 	ErrNotFound     = errors.New("virtual machine not found")
-	ErrConflict     = errors.New("virtual machine must be stopped before deletion")
+	ErrConflict     = errors.New("virtual machine state conflict")
 )
 
 // UUIDs in resource URLs must use the standard hyphenated hex format.
@@ -32,6 +32,7 @@ type Repository interface {
 	Create(context.Context, CreateInput) (VirtualMachine, error)
 	Get(context.Context, string) (VirtualMachine, error)
 	Delete(context.Context, string) error
+	Transition(context.Context, string, string, string) (VirtualMachine, error)
 }
 
 type Service struct {
@@ -76,4 +77,19 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 		return fmt.Errorf("%w: id must be a UUID", ErrInvalidInput)
 	}
 	return s.repository.Delete(ctx, id)
+}
+
+func (s *Service) Start(ctx context.Context, id string) (VirtualMachine, error) {
+	return s.transition(ctx, id, StatusStopped, StatusStarting)
+}
+
+func (s *Service) Stop(ctx context.Context, id string) (VirtualMachine, error) {
+	return s.transition(ctx, id, StatusRunning, StatusStopping)
+}
+
+func (s *Service) transition(ctx context.Context, id, from, to string) (VirtualMachine, error) {
+	if !uuidPattern.MatchString(id) {
+		return VirtualMachine{}, fmt.Errorf("%w: id must be a UUID", ErrInvalidInput)
+	}
+	return s.repository.Transition(ctx, id, from, to)
 }

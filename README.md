@@ -12,11 +12,13 @@ A portfolio-focused Go backend project that simulates cloud VM resource manageme
 
 **Milestone 4 complete:** VM create, list, get and delete endpoints manually verified by the project owner; UUID validation and stopped-only deletion implemented.
 
+**Milestone 5 in progress, Step 1:** start/stop requests persist validated intermediate states; local verification pending. Background completion and event history are not yet implemented.
+
 - [x] **1. Go API foundation (2–3 h):** entry point, HTTP routing, JSON health endpoint.
 - [x] **2. Docker and PostgreSQL (4–6 h):** multi-stage Dockerfile, Compose networking, PostgreSQL connection and persistent volume; manually verified.
 - [x] **3. Database design (6–8 h):** schema, constraints, migrations and repository layer.
 - [x] **4. VM REST API (8–10 h):** create, list, get and delete VM records; manual verification complete.
-- [ ] **5. VM lifecycle (8–12 h):** state transitions, worker and event history.
+- [ ] **5. VM lifecycle (8–12 h):** state transitions, worker and event history. *(Step 1 start/stop requests ready to verify.)*
 - [ ] **6. Authentication (8–12 h):** account signup, password hashing, tokens, ownership.
 - [ ] **7. API improvements (4–6 h):** validation, pagination, filtering and errors.
 - [ ] **8. Quality and verification (8–10 h):** manual integration and failure tests; revisit automated tests for regression prevention.
@@ -49,6 +51,8 @@ Docker Desktop (Linux containers)
   |     POST /vms   -> validates and creates a VM
   |     GET /vms/{id} -> retrieves an individual VM
   |     DELETE /vms/{id} -> deletes a stopped VM
+  |     POST /vms/{id}/start -> requests start
+  |     POST /vms/{id}/stop  -> requests stop
   |         |
   |         | DATABASE_URL uses host "db", port 5432
   |         v
@@ -458,12 +462,63 @@ Expected: UPDATE 1, DELETE 204 with no body, subsequent GET and DELETE 404, and 
 
 Milestone 5 will introduce lifecycle actions and asynchronous state changes.
 
+## Milestone 5, Step 1: safe lifecycle requests
+
+The service defines two user-triggered transitions: stopped -> starting and running -> stopping. Other current states produce HTTP 409 Conflict. The repository reads and locks the VM row with SELECT ... FOR UPDATE, checks the expected state, updates status and updated_at, and commits before responding. This shares the deletion lock protocol, so concurrent lifecycle and delete requests cannot overwrite a stale decision.
+
+| Method and path | Accepted | Conflict |
+| --- | --- | --- |
+| POST /vms/{id}/start | 202, status starting | VM not stopped |
+| POST /vms/{id}/stop | 202, status stopping | VM not running |
+
+Both return 400 for malformed UUID and 404 for missing VM. The response includes a Location header pointing to the VM, which clients can GET to observe its state. No new migrations are needed because migration 000001 already permits these states.
+
+**Learning-stage limitation:** No worker is running yet. VMs remain in starting/stopping until manually completed in this exercise or processed by the worker in Step 2. Only use a disposable VM for the manual SQL below; it simulates completion, not actual VM provisioning.
+
+### Verify
+
+```bash
+git switch main
+git pull --ff-only origin main
+docker compose up --build -d
+curl -i -X POST http://localhost:8080/vms \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"lifecycle-check","cpu_cores":2,"memory_mb":4096,"region":"eu-central-1"}'
+```
+
+Copy the disposable VM's UUID into the variable:
+
+```bash
+VM_ID='PASTE-UUID-HERE'
+curl -i -X POST "http://localhost:8080/vms/$VM_ID/start"
+curl -i "http://localhost:8080/vms/$VM_ID"
+curl -i -X POST "http://localhost:8080/vms/$VM_ID/start"
+curl -i -X POST "http://localhost:8080/vms/$VM_ID/stop"
+curl -i -X DELETE "http://localhost:8080/vms/$VM_ID"
+```
+
+Expected: 202 starting, GET 200 starting, then three 409 conflicts. Simulate completion of the start for this disposable VM only:
+
+```bash
+docker compose exec -T db psql -X -v ON_ERROR_STOP=1 -U cloud_resource -d cloud_resource -v vm_id="$VM_ID" <<'SQL'
+UPDATE virtual_machines SET status = 'running', updated_at = NOW()
+WHERE id = :'vm_id'::uuid AND name = 'lifecycle-check' AND status = 'starting';
+SQL
+curl -i -X POST "http://localhost:8080/vms/$VM_ID/stop"
+curl -i "http://localhost:8080/vms/$VM_ID"
+```
+
+Expected: UPDATE 1, POST 202 stopping and GET 200 stopping. Leave this VM in stopping for the next step; the worker will complete pending transitions. No real VM is started or stopped.
+
+For a concurrency experiment, create another stopped disposable VM and issue two start requests simultaneously: exactly one should be accepted, while the other returns 409 if both complete normally. Step 2 introduces asynchronous completion using a Go background worker. Event history and crash recovery verification follow.
+
 ## Current repository structure
 
 ```text
 cmd/api/main.go              # Server startup and database connection
 internal/vm/vm.go            # VM domain model
 internal/vm/service.go       # Business rules and repository interface
+internal/vm/lifecycle.go     # Lifecycle state constants
 internal/storage/postgres/vm_repository.go # SQL query and row mapping
 internal/httpapi/router.go   # HTTP route registration and health/readiness
 internal/httpapi/vm_handler.go # JSON request and response handling
