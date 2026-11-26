@@ -2,9 +2,11 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/ashirzad313/Cloud-Resource/internal/vm"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -83,4 +85,63 @@ func (r *VMRepository) Create(ctx context.Context, input vm.CreateInput) (vm.Vir
 	}
 
 	return machine, nil
+}
+
+// Get retrieves a single VM by its primary key.
+func (r *VMRepository) Get(ctx context.Context, id string) (vm.VirtualMachine, error) {
+	const query = `
+		SELECT id::text, name, cpu_cores, memory_mb, region, status,
+		       created_at, updated_at
+		FROM virtual_machines
+		WHERE id = $1::text::uuid
+	`
+
+	var machine vm.VirtualMachine
+	err := r.pool.QueryRow(ctx, query, id).Scan(
+		&machine.ID, &machine.Name, &machine.CPUCores, &machine.MemoryMB,
+		&machine.Region, &machine.Status, &machine.CreatedAt, &machine.UpdatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return vm.VirtualMachine{}, vm.ErrNotFound
+	}
+	if err != nil {
+		return vm.VirtualMachine{}, fmt.Errorf("get virtual machine: %w", err)
+	}
+	return machine, nil
+}
+
+// Delete removes only a stopped VM. The row lock keeps the status check
+// and deletion atomic with respect to concurrent updates and deletes.
+func (r *VMRepository) Delete(ctx context.Context, id string) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin VM deletion: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	var status string
+	err = tx.QueryRow(ctx,
+		"SELECT status FROM virtual_machines WHERE id = $1::text::uuid FOR UPDATE",
+		id,
+	).Scan(&status)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return vm.ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("lock virtual machine: %w", err)
+	}
+	if status != "stopped" {
+		return vm.ErrConflict
+	}
+
+	if _, err := tx.Exec(ctx,
+		"DELETE FROM virtual_machines WHERE id = $1::text::uuid", id,
+	); err != nil {
+		return fmt.Errorf("delete virtual machine: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit VM deletion: %w", err)
+	}
+	return nil
 }
