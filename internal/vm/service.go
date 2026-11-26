@@ -16,18 +16,7 @@ var (
 )
 
 // UUIDs in resource URLs must use the standard hyphenated hex format.
-var uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}package vm
-
-import (
-	"context"
-	"errors"
-	"fmt"
-	"regexp"
-	"strings"
-	"unicode/utf8"
-)
-
-)
+var uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
 // CreateInput contains the values a client is allowed to supply.
 type CreateInput struct {
