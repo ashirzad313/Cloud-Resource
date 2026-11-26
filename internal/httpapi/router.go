@@ -2,9 +2,10 @@ package httpapi
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"time"
+
+	"github.com/ashirzad313/Cloud-Resource/internal/vm"
 )
 
 // DatabasePinger describes the one database operation this HTTP layer needs.
@@ -14,10 +15,13 @@ type DatabasePinger interface {
 }
 
 // NewRouter configures the application's HTTP routes.
-func NewRouter(database DatabasePinger) http.Handler {
+func NewRouter(database DatabasePinger, service *vm.Service) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", healthHandler)
 	mux.HandleFunc("GET /ready", readinessHandler(database))
+	handler := vmHandler{service: service}
+	mux.HandleFunc("GET /vms", handler.list)
+	mux.HandleFunc("POST /vms", handler.create)
 	return mux
 }
 
@@ -45,9 +49,7 @@ func readinessHandler(database DatabasePinger) http.HandlerFunc {
 }
 
 func writeStatus(w http.ResponseWriter, code int, status string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(struct {
+	writeJSON(w, code, struct {
 		Status string `json:"status"`
 	}{Status: status})
 }
