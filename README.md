@@ -1,6 +1,6 @@
 # Cloud Resource Management Platform
 
-A portfolio-focused Go backend project that simulates cloud VM resource management. This is a learning-by-running project: one manageable step at a time, with a single cumulative README and manual verification before merging each milestone. No real VMs are provisioned.
+A portfolio-focused Go backend project that simulates cloud VM resource management. This is a learning-by-running project: one manageable step at a time, with a single cumulative README, direct commits to `main`, and manual verification at each milestone. No real VMs are provisioned.
 
 ## Project status and roadmap
 
@@ -10,7 +10,7 @@ A portfolio-focused Go backend project that simulates cloud VM resource manageme
 
 **Milestone 3 complete:** VM schema, repository reads/writes, service validation, GET/POST endpoints and automatic migration tracking manually verified.
 
-**Milestone 4 in progress:** individual VM GET and DELETE endpoints implemented; manual verification pending.
+**Milestone 4 in progress:** individual VM GET and DELETE endpoints integrated into `main`; manual verification pending.
 
 - [x] **1. Go API foundation (2–3 h):** entry point, HTTP routing, JSON health endpoint.
 - [x] **2. Docker and PostgreSQL (4–6 h):** multi-stage Dockerfile, Compose networking, PostgreSQL connection and persistent volume; manually verified.
@@ -23,7 +23,7 @@ A portfolio-focused Go backend project that simulates cloud VM resource manageme
 - [ ] **9. Delivery and CI/CD (6–9 h):** production Docker build, GitHub Actions, API documentation.
 - [ ] **10. Polish (4–6 h):** logging, graceful shutdown, security and CV/interview-ready explanation.
 
-**Estimated total: 58–82 learning hours.** Work in a milestone branch, merge into `main` only after local verification, then delete the branch.
+**Estimated total: 58–82 learning hours.** For this solo learning project, work directly on `main` with descriptive commits and manual verification at each step. Feature branches are optional for risky experiments; do not mark a milestone complete before verification.
 
 ## Technology stack
 
@@ -184,17 +184,17 @@ The table has columns:
 
 The `CHECK` constraints enforce basic validity even if a different application writes to the database. We intentionally postpone user ownership and lifecycle-event tables until those features are introduced; later migrations will extend this schema.
 
-### 1. Get the branch and start PostgreSQL
+### 1. Update the repository and start PostgreSQL
 
 Run from the repository root:
 
 ```bash
-git fetch origin
-git switch --track origin/milestone/03-database-design
+git switch main
+git pull --ff-only origin main
 docker compose up -d
 ```
 
-If you already have the local branch, use `git switch milestone/03-database-design` instead. Your existing `.env` file from Milestone 2 stays local and is reused. If it is missing, copy `.env.example` to `.env` before starting Compose.
+Your existing `.env` file from Milestone 2 stays local and is reused. If it is missing, copy `.env.example` to `.env` before starting Compose.
 
 ### 2. Apply the migration exactly once
 
@@ -270,8 +270,8 @@ Authentication is not implemented yet. These endpoints are for local development
 ### 1. Get the latest code and rebuild
 
 ```bash
-git switch milestone/03-database-design
-git pull --ff-only
+git switch main
+git pull --ff-only origin main
 docker compose up --build -d
 ```
 
@@ -327,8 +327,8 @@ Only `*.up.sql` files are run. The runner owns the transaction, so forward migra
 If you manually applied migration 000001 in Step 1, you need to explicitly tell the runner that it is already applied. This is called **baselining**. Do not use these commands on a fresh database; the API will create its schema automatically.
 
 ```bash
-git switch milestone/03-database-design
-git pull --ff-only
+git switch main
+git pull --ff-only origin main
 docker compose up -d --wait db
 docker compose exec db psql -U cloud_resource -d cloud_resource -c '\d virtual_machines'
 ```
@@ -402,15 +402,15 @@ All routes remain local-development-only until authentication and ownership chec
 
 ### Manual verification
 
-Pull the milestone branch and rebuild:
+Update `main` and rebuild:
 
 ```bash
-git fetch origin
-git switch --track origin/milestone/04-vm-rest-api
+git switch main
+git pull --ff-only origin main
 docker compose up --build -d
 ```
 
-If the branch already exists locally, use `git switch milestone/04-vm-rest-api` and `git pull --ff-only` instead. Keep the existing database volume.
+Keep the existing database volume.
 
 Create a **disposable** VM and copy the UUID from its response (or its Location header):
 
