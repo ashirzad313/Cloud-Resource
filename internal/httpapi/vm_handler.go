@@ -78,6 +78,7 @@ func (h vmHandler) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	w.Header().Set("Location", "/vms/"+machine.ID)
 	writeJSON(w, http.StatusCreated, machine)
 }
 
@@ -101,5 +102,51 @@ func writeJSON(w http.ResponseWriter, code int, value any) {
 	w.WriteHeader(code)
 	if err := json.NewEncoder(w).Encode(value); err != nil {
 		log.Printf("write JSON response: %v", err)
+	}
+}
+
+func (h vmHandler) get(w http.ResponseWriter, r *http.Request) {
+	if h.service == nil {
+		writeError(w, http.StatusServiceUnavailable, "database not configured")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	machine, err := h.service.Get(ctx, r.PathValue("id"))
+	if err != nil {
+		writeVMError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, machine)
+}
+
+func (h vmHandler) delete(w http.ResponseWriter, r *http.Request) {
+	if h.service == nil {
+		writeError(w, http.StatusServiceUnavailable, "database not configured")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	if err := h.service.Delete(ctx, r.PathValue("id")); err != nil {
+		writeVMError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// Translate domain errors into HTTP responses without exposing SQL errors.
+func writeVMError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, vm.ErrInvalidInput):
+		writeError(w, http.StatusBadRequest, err.Error())
+	case errors.Is(err, vm.ErrNotFound):
+		writeError(w, http.StatusNotFound, err.Error())
+	case errors.Is(err, vm.ErrConflict):
+		writeError(w, http.StatusConflict, err.Error())
+	default:
+		log.Printf("VM operation: %v", err)
+		writeError(w, http.StatusInternalServerError, "virtual machine operation failed")
 	}
 }
