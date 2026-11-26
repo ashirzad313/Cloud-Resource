@@ -8,11 +8,11 @@ A portfolio-focused Go backend project that simulates cloud VM resource manageme
 
 **Milestone 2 complete:** Dockerized Go API, PostgreSQL with Docker Compose, database connectivity and `/ready` manually verified.
 
-**Milestone 3 in progress:** Steps 1–3 (VM schema, repository reads/writes, service validation and GET/POST endpoints) verified locally. Step 4 (automatic migration tracking) implemented; local verification pending.
+**Milestone 3 complete:** VM schema, repository reads/writes, service validation, GET/POST endpoints and automatic migration tracking manually verified.
 
 - [x] **1. Go API foundation (2–3 h):** entry point, HTTP routing, JSON health endpoint.
 - [x] **2. Docker and PostgreSQL (4–6 h):** multi-stage Dockerfile, Compose networking, PostgreSQL connection and persistent volume; manually verified.
-- [ ] **3. Database design (6–8 h):** schema, constraints, migrations and repository layer. *(Steps 1–3 verified; Step 4 automatic migration tracking ready to verify.)*
+- [x] **3. Database design (6–8 h):** schema, constraints, migrations and repository layer.
 - [ ] **4. VM REST API (8–10 h):** finish and verify create, list, get and delete VM records. (Create/list introduced early to verify the repository without a temporary CLI.)
 - [ ] **5. VM lifecycle (8–12 h):** state transitions, worker and event history.
 - [ ] **6. Authentication (8–12 h):** account signup, password hashing, tokens, ownership.
@@ -381,7 +381,7 @@ docker compose up -d
 
 This uses a separate named volume, leaving your original VM data intact. The check project's volume is retained after down. If startup fails, inspect API logs before making any changes to the database.
 
-After local verification, Milestone 3 can be merged. Milestone 4 finishes the remaining VM REST operations.
+Milestone 3 verified by the project owner. Milestone 4 finishes the remaining VM REST operations.
 
 ## Current repository structure
 
