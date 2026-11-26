@@ -22,6 +22,8 @@ func NewRouter(database DatabasePinger, service *vm.Service) http.Handler {
 	handler := vmHandler{service: service}
 	mux.HandleFunc("GET /vms", handler.list)
 	mux.HandleFunc("POST /vms", handler.create)
+	mux.HandleFunc("GET /vms/{id}", handler.get)
+	mux.HandleFunc("DELETE /vms/{id}", handler.delete)
 	return mux
 }
 
