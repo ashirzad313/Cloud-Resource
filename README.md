@@ -10,12 +10,12 @@ A portfolio-focused Go backend project that simulates cloud VM resource manageme
 
 **Milestone 3 complete:** VM schema, repository reads/writes, service validation, GET/POST endpoints and automatic migration tracking manually verified.
 
-**Milestone 4 in progress:** individual VM GET and DELETE endpoints integrated into `main`; manual verification pending.
+**Milestone 4 complete:** VM create, list, get and delete endpoints manually verified by the project owner; UUID validation and stopped-only deletion implemented.
 
 - [x] **1. Go API foundation (2–3 h):** entry point, HTTP routing, JSON health endpoint.
 - [x] **2. Docker and PostgreSQL (4–6 h):** multi-stage Dockerfile, Compose networking, PostgreSQL connection and persistent volume; manually verified.
 - [x] **3. Database design (6–8 h):** schema, constraints, migrations and repository layer.
-- [ ] **4. VM REST API (8–10 h):** create, list, get and delete VM records. *(Create/list verified in Milestone 3; get/delete and status handling ready to verify.)*
+- [x] **4. VM REST API (8–10 h):** create, list, get and delete VM records; manual verification complete.
 - [ ] **5. VM lifecycle (8–12 h):** state transitions, worker and event history.
 - [ ] **6. Authentication (8–12 h):** account signup, password hashing, tokens, ownership.
 - [ ] **7. API improvements (4–6 h):** validation, pagination, filtering and errors.
